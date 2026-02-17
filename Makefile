@@ -12,8 +12,8 @@ VPATH=src/
 #LIBS += -lsocket -lnsl -lrt
 LIBS+=-lpthread
 
-INCLUDE = readcmd.h csapp.h
-OBJS = readcmd.o csapp.o
+INCLUDE = readcmd.h csapp.h builtins.h 
+OBJS = readcmd.o csapp.o builtins.o
 INCLDIR = -I.
 
 all: shell

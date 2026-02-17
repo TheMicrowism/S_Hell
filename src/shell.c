@@ -1,5 +1,6 @@
 #include "shell.h"
 #include "csapp.h"
+#include "readcmd.h"
 #include <fcntl.h>
 #include <signal.h>
 #include <stddef.h>
@@ -10,56 +11,48 @@
 
 char cwd[BUFSIZ] = "\0";
 char pwd[BUFSIZ] = "\0";
-
-int Echo(char **args) {
-  for (int arg = 0; arg < MAXARGS; arg++) {
-    if (args[arg] == NULL) {
-      return 0;
-    }
-    printf("%s ", args[arg]);
-  }
-  fprintf(stderr, "echo error");
-  return 1;
-}
-
-int Quit(char **args) {
-  exit(0);
-  unix_error("error quitting");
-}
-
-int ChangeDir(char **args) {
-  int res;
-  if (strcmp(args[0], "-") == 0) {
-    if (strcmp(pwd, "\0")) {
-      res = chdir(pwd);
-    } else {
-      fprintf(stderr, "No previous directory");
-      return 1;
-    }
-  } else {
-    res = chdir(args[0]);
-  }
-  if (res != 0) {
-    perror("ChangeDir error");
-    return res;
-  }
-  strcpy(pwd, cwd);
-  return res;
-}
-
-BuiltinTab Builtins = {
+jobsTab Jobs = {.fgNb = 1};
+builtinTab Builtins = {
     4, {{Echo, "echo"}, {Quit, "quit"}, {Quit, "q"}, {ChangeDir, "cd"}}};
 
-int executeBuiltins(char **args) {
-  // printf("DEBUG: executing %s", args[0]);
-  for (int i = 0; i < Builtins.size; i++) {
-    if (strcmp(args[0], Builtins.tab[i].BuiltinName) == 0) {
-      Builtins.tab[i].BuiltinFunc(args + 1);
-      printf("\n");
-      return 0;
-    }
+int emptyJobNb() {
+  for (int i = 0; i < MAXJOBS; i++) {
+    if (Jobs.stateTab[i] == EMPTY)
+      return i;
   }
-  return 1;
+  return -1;
+}
+
+int changJobsState(int jobNb, pid_t pgid, struct cmdline cmd,
+                   enum jobState state) {
+  // blocking all signals
+  sigset_t newSet, oldSet;
+  if (sigfillset(&newSet) < 0) {
+    perror("Error setting up sig mask for changeJobsState");
+    return -1;
+  }
+
+  if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0) {
+    perror("Error blocking signals for changeJobsState");
+    return -1;
+  }
+
+  if (Jobs.stateTab[jobNb] == EMPTY) {
+    Jobs.stateTab[jobNb] = state;
+    Jobs.cmdTab[jobNb] = cmd;
+    Jobs.pgidTab[jobNb] = pgid;
+  }
+  if (state == FOREGROUND)
+    Jobs.fgNb = jobNb;
+
+  // restoring mask
+  if (sigprocmask(SIG_SETMASK, &oldSet, NULL) < 0) {
+    perror("Error restoring mask for changeJobsState;");
+    return -1;
+  }
+
+  printf("Jobs: [%d] %d\n", jobNb + 1, state);
+  return 0;
 }
 
 void handlerSIGCHLD(int sig) {
@@ -81,11 +74,11 @@ int main() {
   while (1) {
     struct cmdline *l;
     int i, j;
-    pid_t childrenPid[MAXCHILD];
-    pid_t childPid;
+    pid_t childPid, childPgid;
     int fdIn, fdOut;
     int stdinCpy = dup(0);
     int stdoutCpy = dup(1);
+    unsigned char backgroundProcess = 0;
 
     if (stdinCpy < 0 || stdoutCpy < 0) {
       unix_error("Failed backing up stdin/out");
@@ -114,8 +107,10 @@ int main() {
     }
 
     if (l->in) {
-      fdIn = open(l->in, O_RDONLY, S_IRWXU);
-      if (dup2(fdIn, 0) < 0) {
+      if ((fdIn = open(l->in, O_RDONLY, S_IRWXU)) < 0) {
+        fprintf(stderr, "%s: %s\n", l->in, strerror(errno));
+        continue;
+      } else if (dup2(fdIn, 0) < 0) {
         perror("Input redirection failed");
         continue;
       }
@@ -123,8 +118,11 @@ int main() {
     }
 
     if (l->out) {
-      fdOut = open(l->out, O_WRONLY | O_CREAT, S_IRWXU);
-      if (dup2(fdOut, 1) < 0) {
+      if ((fdOut = open(l->out, O_WRONLY | O_CREAT, S_IRWXU)) < 0) {
+
+        fprintf(stderr, "%s: %s\n", l->out, strerror(errno));
+        continue;
+      } else if (dup2(fdOut, 1) < 0) {
         perror("Output redirection failed");
         continue;
       }
@@ -147,7 +145,15 @@ int main() {
       char **cmd = l->seq[i];
       //      printf("seq[%d]: ", i);
       for (j = 0; cmd[j] != 0; j++) {
-        if (wordexp(cmd[j], &eArgs, j == 0 ? 0 : WRDE_APPEND) != 0) {
+        if (strcmp(cmd[j], "&") == 0) {
+          if (i == nbCmd - 1 && cmd[j + 1] == 0) {
+            backgroundProcess = 1;
+            printf("backgroundProcess\n");
+          } else {
+            fprintf(stderr, "syntax error: & is not placed at the end, "
+                            "executing process in the foreground \n");
+          }
+        } else if (wordexp(cmd[j], &eArgs, j == 0 ? 0 : WRDE_APPEND) != 0) {
           perror("error expanding argument");
         }
       }
@@ -157,11 +163,15 @@ int main() {
       if (nbCmd <= 1) {
         exInFunction = executeBuiltins(eArgs.we_wordv);
       }
-      // CHILD HEREEEEEEEEEEEEEEEEEEEEEEEEEEE
+
       if (exInFunction != 0) {
         childPid = Fork();
-        if (childPid == 0) {
+        if (i == 0)
+          childPgid = childPid;
 
+        // CHILD HEREEEEEEEEEEEEEEEEEEEEEEEEEEE
+        if (childPid == 0) {
+          // setting up pipes for child
           for (int termPipe = 0; termPipe < nbCmd - 1; termPipe++) {
             if (termPipe == i) {
               // printf("child %d closing pipe %d end 0\n", i, termPipe);
@@ -188,13 +198,31 @@ int main() {
 
           execvp(cmd[0], eArgs.we_wordv);
           // error in case execvp failed
-          unix_error("failed to execute ");
+          unix_error("dvfefa");
 
           // END CHILDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD
         } else {
-          childrenPid[i] = childPid;
+          if (i == 0) {
+            int newjobnb = emptyJobNb();
+            if (newjobnb < 0) {
+              Kill(childPid, SIGINT);
+              fprintf(stderr, "No empty job slot\n");
+              break;
+            }
+            if (backgroundProcess) {
+              if (changJobsState(newjobnb, childPgid, *l, BACKGROUND) < 0) {
+                Kill(childPid, SIGINT);
+                break;
+              }
+
+            } else if (changJobsState(newjobnb, childPgid, *l, FOREGROUND) <
+                       0) {
+              Kill(childPid, SIGINT);
+              break;
+            }
+          }
+
           childPid = -1;
-          // waitpid(childrenPid[i], NULL, 0);
         }
       }
 
@@ -207,11 +235,13 @@ int main() {
       close(pipes[i][0]);
     }
 
-    pid_t pidWait;
-    while ((pidWait = waitpid(-1, NULL, 0)) > 0) {
-    }
-    if (pidWait < 0 && errno != ECHILD) {
-      unix_error("waitpid error");
+    if (!backgroundProcess) {
+      pid_t pidWait;
+      while ((pidWait = waitpid(-1, NULL, 0)) > 0) {
+      }
+      if (pidWait < 0 && errno != ECHILD) {
+        unix_error("waitpid error");
+      }
     }
 
     if (dup2(stdoutCpy, 1) < 0) {
