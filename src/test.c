@@ -12,6 +12,7 @@
 char cwd[BUFSIZ] = "\0";
 char pwd[BUFSIZ] = "\0";
 jobsTab Jobs = {.fgNb = 1};
+int fils_termine = 0;
 builtinTab Builtins = {
     4, {{Echo, "echo"}, {Quit, "quit"}, {Quit, "q"}, {ChangeDir, "cd"}}};
 
@@ -61,7 +62,7 @@ int changJobsState(int jobNb, pid_t pgid, struct cmdline cmd,
   printf("Jobs: [%d] %d\n", jobNb + 1, state);
   return 0;
 }
-
+/*
 int supprime_jobs()
 {
   sigset_t newSet, oldSet;
@@ -96,8 +97,6 @@ int supprime_jobs()
       if (Jobs.fgNb == i)
         Jobs.fgNb = -1;
     }
-    if (Jobs.fgNb == i)
-      Jobs.fgNb = -1;
     printf("supprime le jobs %d\n", i + 1);
   }
 
@@ -109,7 +108,46 @@ int supprime_jobs()
 
   return 0;
 }
+*/
 
+int supprime_jobs(pid_t pgid, int i)
+{
+  sigset_t newSet, oldSet;
+  if (sigfillset(&newSet) < 0)
+  {
+    perror("Error setting up sig mask for changeJobsState");
+    return -1;
+  }
+
+  if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0)
+  {
+    perror("Error blocking signals for changeJobsState");
+    return -1;
+  }
+
+  // Chercher et supprimer le job correspondant au pgid
+  if (Jobs.pgidTab[i] == pgid && Jobs.stateTab[i] != EMPTY)
+  {
+    Jobs.stateTab[i] = EMPTY;
+    Jobs.pgidTab[i] = 0;
+    printf("Job [%d] terminé\n", i + 1);
+
+    if (sigprocmask(SIG_SETMASK, &oldSet, NULL) < 0)
+    {
+      perror("supprime_jobs");
+      return -1;
+    }
+    return 0;
+  }
+
+  if (sigprocmask(SIG_SETMASK, &oldSet, NULL) < 0)
+  {
+    perror("Error restoring mask for changeJobsState;");
+    return -1;
+  }
+
+  return 0;
+}
 void handlerSIGCHLD(int sig)
 {
   pid_t pid;
@@ -122,8 +160,8 @@ void handlerSIGCHLD(int sig)
   {
     unix_error("waitpid error");
   }
+  fils_termine = 1;
 
-  supprime_jobs();
   return;
 }
 
@@ -157,7 +195,6 @@ int main()
     printf("%s%s>\e[0m ", KBLU, cwd);
 
     l = readcmd();
-
     /* If input stream closed, normal termination */
     if (!l)
     {
@@ -344,12 +381,21 @@ int main()
       pid_t pidWait;
       while ((pidWait = waitpid(-1, NULL, 0)) > 0)
       {
+        for (int i = 0; i < MAXJOBS; i++)
+        {
+          if (Jobs.pgidTab[i] == pidWait)
+          {
+            supprime_jobs(pidWait, i);
+            break;
+          }
+        }
       }
       if (pidWait < 0 && errno != ECHILD)
       {
         unix_error("waitpid error");
       }
     }
+
     if (dup2(stdoutCpy, 1) < 0)
     {
       unix_error("Failed to put back stdout");
