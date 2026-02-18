@@ -125,7 +125,6 @@ int supprime_jobs(pid_t pgid, int i)
     return -1;
   }
 
-  // Chercher et supprimer le job correspondant au pgid
   if (Jobs.pgidTab[i] == pgid && Jobs.stateTab[i] != EMPTY)
   {
     Jobs.stateTab[i] = EMPTY;
