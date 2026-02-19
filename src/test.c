@@ -12,7 +12,6 @@
 char cwd[BUFSIZ] = "\0";
 char pwd[BUFSIZ] = "\0";
 jobsTab Jobs = {.fgNb = 1};
-int fils_termine = 0;
 builtinTab Builtins = {
     4, {{Echo, "echo"}, {Quit, "quit"}, {Quit, "q"}, {ChangeDir, "cd"}}};
 
@@ -152,14 +151,22 @@ void handlerSIGCHLD(int sig)
   pid_t pid;
   while ((pid = waitpid(-1, NULL, WNOHANG)) > 0)
   {
-    ;
+
     printf("Handler reaped child %d\n", (int)pid);
+    for (int i = 0; i < MAXJOBS; i++)
+    {
+      if (Jobs.pgidTab[i] == pid)
+
+      {
+        supprime_jobs(pid, i);
+        break;
+      }
+    }
   }
   if (pid < 0 && errno != ECHILD)
   {
     unix_error("waitpid error");
   }
-  fils_termine = 1;
 
   return;
 }
@@ -383,6 +390,7 @@ int main()
         for (int i = 0; i < MAXJOBS; i++)
         {
           if (Jobs.pgidTab[i] == pidWait)
+
           {
             supprime_jobs(pidWait, i);
             break;
