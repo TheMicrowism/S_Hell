@@ -129,6 +129,7 @@ int supprime_jobs(pid_t pgid, int i)
     Jobs.stateTab[i] = EMPTY;
     Jobs.pgidTab[i] = 0;
     printf("Job [%d] terminé\n", i + 1);
+    // printf("hi");
 
     if (sigprocmask(SIG_SETMASK, &oldSet, NULL) < 0)
     {
@@ -170,11 +171,16 @@ void handlerSIGCHLD(int sig)
 
   return;
 }
-
+void handler_sigint(int sig)
+{
+  write(1, "\n", 1);
+  return;
+}
 int main()
 {
 
   Signal(SIGCHLD, handlerSIGCHLD);
+  Signal(SIGINT, handler_sigint);
 
   while (1)
   {
@@ -302,6 +308,7 @@ int main()
         // CHILD HEREEEEEEEEEEEEEEEEEEEEEEEEEEE
         if (childPid == 0)
         {
+          signal(SIGINT, SIG_DFL);
           // setting up pipes for child
           for (int termPipe = 0; termPipe < nbCmd - 1; termPipe++)
           {
@@ -354,6 +361,7 @@ int main()
             }
             if (backgroundProcess)
             {
+              // printf("hi");
               if (changJobsState(newjobnb, childPgid, *l, BACKGROUND) < 0)
               {
                 Kill(childPid, SIGINT);
@@ -387,6 +395,7 @@ int main()
       pid_t pidWait;
       while ((pidWait = waitpid(-1, NULL, 0)) > 0)
       {
+        // printf("hi");
         for (int i = 0; i < MAXJOBS; i++)
         {
           if (Jobs.pgidTab[i] == pidWait)
