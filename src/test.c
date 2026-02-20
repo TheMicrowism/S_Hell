@@ -114,13 +114,13 @@ int supprime_jobs(pid_t pgid, int i)
   sigset_t newSet, oldSet;
   if (sigfillset(&newSet) < 0)
   {
-    perror("Error setting up sig mask for changeJobsState");
+    perror("Error setting up sig mask for supprime_jobs");
     return -1;
   }
 
   if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0)
   {
-    perror("Error blocking signals for changeJobsState");
+    perror("Error blocking signals for supprime_jobs");
     return -1;
   }
 
@@ -141,7 +141,7 @@ int supprime_jobs(pid_t pgid, int i)
 
   if (sigprocmask(SIG_SETMASK, &oldSet, NULL) < 0)
   {
-    perror("Error restoring mask for changeJobsState;");
+    perror("Error restoring mask for supprime_jobs;");
     return -1;
   }
 
@@ -308,7 +308,7 @@ int main()
         // CHILD HEREEEEEEEEEEEEEEEEEEEEEEEEEEE
         if (childPid == 0)
         {
-          signal(SIGINT, SIG_DFL);
+          Signal(SIGINT, SIG_DFL);
           // setting up pipes for child
           for (int termPipe = 0; termPipe < nbCmd - 1; termPipe++)
           {
@@ -399,9 +399,15 @@ int main()
         for (int i = 0; i < MAXJOBS; i++)
         {
           if (Jobs.pgidTab[i] == pidWait)
-
           {
-            supprime_jobs(pidWait, i);
+            while (waitpid(pidWait, NULL, WNOHANG) > 0)
+            {
+              ;
+            }
+            if (kill(-pidWait, 0) == -1 && errno == ESRCH)
+            {
+              supprime_jobs(pidWait, i);
+            }
             break;
           }
         }
