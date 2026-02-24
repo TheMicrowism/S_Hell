@@ -1,3 +1,5 @@
+#ifndef __SHELLHEADER__
+#define __SHELLHEADER__
 
 /*
  * Copyright (C) 2002, Simon Nieuviarts
@@ -16,13 +18,20 @@
 #define MAXPIPE 10
 #define MAXJOBS 10
 
-enum jobState { EMPTY, FOREGROUND, BACKGROUND, STOPPED, DONE };
+enum processState { PEMPTY, PRUNNING, PSTOPPED, PDONE };
+typedef struct {
+  pid_t pid[MAXCHILD];
+  enum processState pidStateTab[MAXCHILD];
+} jobPidsTab;
+
+enum jobState { EMPTY, FOREGROUND, BACKGROUND, STOPPED };
 
 typedef struct {
   int fgNb;
   pid_t pgidTab[MAXJOBS];
   enum jobState stateTab[MAXJOBS];
-  struct cmdline cmdTab[MAXJOBS];
+  char commandTab[MAXJOBS][BUFSIZ];
+  jobPidsTab childrenPids[MAXJOBS];
 } jobsTab;
 
 #define KNRM "\x1B[0m"
@@ -33,3 +42,5 @@ typedef struct {
 #define KMAG "\x1B[35m"
 #define KCYN "\x1B[36m"
 #define KWHT "\x1B[37m"
+
+#endif

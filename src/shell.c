@@ -1,84 +1,92 @@
 #include "shell.h"
 #include "csapp.h"
+#include "jobs.h"
 #include "readcmd.h"
-#include <fcntl.h>
-#include <signal.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <wordexp.h>
 
 char cwd[BUFSIZ] = "\0";
 char pwd[BUFSIZ] = "\0";
-jobsTab Jobs = {.fgNb = 1};
-builtinTab Builtins = {
-    4, {{Echo, "echo"}, {Quit, "quit"}, {Quit, "q"}, {ChangeDir, "cd"}}};
+jobsTab Jobs = {.fgNb = -1};
 
-int emptyJobNb() {
-  for (int i = 0; i < MAXJOBS; i++) {
-    if (Jobs.stateTab[i] == EMPTY)
-      return i;
-  }
-  return -1;
-}
-
-int changJobsState(int jobNb, pid_t pgid, struct cmdline cmd,
-                   enum jobState state) {
-  // blocking all signals
-  sigset_t newSet, oldSet;
-  if (sigfillset(&newSet) < 0) {
-    perror("Error setting up sig mask for changeJobsState");
-    return -1;
-  }
-
-  if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0) {
-    perror("Error blocking signals for changeJobsState");
-    return -1;
-  }
-
-  if (Jobs.stateTab[jobNb] == EMPTY) {
-    Jobs.stateTab[jobNb] = state;
-    Jobs.cmdTab[jobNb] = cmd;
-    Jobs.pgidTab[jobNb] = pgid;
-  }
-  if (state == FOREGROUND)
-    Jobs.fgNb = jobNb;
-
-  // restoring mask
-  if (sigprocmask(SIG_SETMASK, &oldSet, NULL) < 0) {
-    perror("Error restoring mask for changeJobsState;");
-    return -1;
-  }
-
-  printf("Jobs: [%d] %d\n", jobNb + 1, state);
-  return 0;
-}
+builtinTab Builtins = {9,
+                       {{Echo, "echo"},
+                        {Quit, "quit"},
+                        {Quit, "q"},
+                        {ChangeDir, "cd"},
+                        {ActiveJobsList, "jobs"},
+                        {Foreground, "fg"},
+                        {Background, "bg"},
+                        {Terminate, "term"},
+                        {Stop, "stop"}}};
 
 void handlerSIGCHLD(int sig) {
   pid_t pid;
-  while ((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
-    ;
-    printf("Handler reaped child %d\n", (int)pid);
+  int status;
+  while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED)) > 0) {
+    if (WIFEXITED(status)) {
+      changeProccessState(pid, PDONE);
+    }
+    // printf("Handler reaped child %d\n", (int)pid);
+    if (WIFSIGNALED(status)) {
+      changeProccessState(pid, PDONE);
+    }
+
+    if (WIFSTOPPED(status)) {
+      changeProccessState(pid, PSTOPPED);
+
+      // printf("Child %d stopped via signal\n", (int)pid);
+    }
+    if (WIFCONTINUED(status)) {
+      changeProccessState(pid, PRUNNING);
+      printf("Child %d continued\n", (int)pid);
+    }
+
+    status = 0;
+  }
+  int update = updateJobsList();
+  if (update < 0) {
+    exit(1);
+  }
+  if (Jobs.fgNb < 0 && update > 0) {
+
+    printf("\n%s%s>\e[0m ", KBLU, cwd);
+    fflush(stdout);
   }
   if (pid < 0 && errno != ECHILD) {
     unix_error("waitpid error");
   }
+
   return;
+}
+void messageHandler(int sig) {
+  printf("call quit or q to exit shell\n \n%s%s>\e[0m ", KBLU, cwd);
+  fflush(stdout);
 }
 
 int main() {
 
   Signal(SIGCHLD, handlerSIGCHLD);
+  Signal(SIGINT, messageHandler);
+  Signal(SIGTSTP, messageHandler);
+
+  for (int i = 0; i < MAXJOBS; i++) {
+    Jobs.stateTab[i] = EMPTY;
+    for (int j = 0; j < MAXCHILD; j++) {
+      Jobs.childrenPids[i].pidStateTab[j] = PEMPTY;
+    }
+  }
 
   while (1) {
     struct cmdline *l;
     int i, j;
-    pid_t childPid, childPgid;
+    pid_t childPid, childPgid = 0;
     int fdIn, fdOut;
     int stdinCpy = dup(0);
     int stdoutCpy = dup(1);
     unsigned char backgroundProcess = 0;
+    char commandLine[BUFSIZ];
+
+    int newjobnb;
 
     if (stdinCpy < 0 || stdoutCpy < 0) {
       unix_error("Failed backing up stdin/out");
@@ -92,7 +100,7 @@ int main() {
     }
     printf("%s%s>\e[0m ", KBLU, cwd);
 
-    l = readcmd();
+    l = readcmd(commandLine);
 
     /* If input stream closed, normal termination */
     if (!l) {
@@ -103,6 +111,31 @@ int main() {
     if (l->err) {
       /* Syntax error, read another command */
       printf("error: %s\n", l->err);
+      continue;
+    }
+    // counting children
+    for (i = 0; l->seq[i] != 0; i++) {
+      nbCmd++;
+    }
+    if (nbCmd == 0) {
+      continue;
+    }
+    backgroundProcess = l->isBackground;
+    // parsing for &
+    //    for (i = 0; l->seq[nbCmd - 1][i] != 0; i++) {
+    //      if (strcmp(l->seq[nbCmd - 1][i], "&") == 0) {
+    //        if (l->seq[nbCmd - 1][i + 1] == 0) {
+    //          backgroundProcess = 1;
+    //          // printf("backgroundProcess\n");
+    //          l->seq[nbCmd - 1][i] = NULL;
+    //        } else {
+    //          fprintf(stderr, "syntax error: & is not placed at the end, "
+    //                          "executing process in the foreground \n");
+    //        }
+    //      }
+    //    }
+    if (nbCmd > MAXCHILD) {
+      fprintf(stderr, "can only run at max %d commands per job\n", MAXCHILD);
       continue;
     }
 
@@ -128,10 +161,7 @@ int main() {
       }
       //    printf("out: %s\n", l->out);
     }
-    // counting children
-    for (i = 0; l->seq[i] != 0; i++) {
-      nbCmd++;
-    }
+
     // creating pipes
     int pipes[nbCmd - 1][2];
     for (i = 0; i < nbCmd - 1; i++) {
@@ -145,15 +175,7 @@ int main() {
       char **cmd = l->seq[i];
       //      printf("seq[%d]: ", i);
       for (j = 0; cmd[j] != 0; j++) {
-        if (strcmp(cmd[j], "&") == 0) {
-          if (i == nbCmd - 1 && cmd[j + 1] == 0) {
-            backgroundProcess = 1;
-            printf("backgroundProcess\n");
-          } else {
-            fprintf(stderr, "syntax error: & is not placed at the end, "
-                            "executing process in the foreground \n");
-          }
-        } else if (wordexp(cmd[j], &eArgs, j == 0 ? 0 : WRDE_APPEND) != 0) {
+        if (wordexp(cmd[j], &eArgs, j == 0 ? 0 : WRDE_APPEND) != 0) {
           perror("error expanding argument");
         }
       }
@@ -166,11 +188,10 @@ int main() {
 
       if (exInFunction != 0) {
         childPid = Fork();
-        if (i == 0)
-          childPgid = childPid;
-
         // CHILD HEREEEEEEEEEEEEEEEEEEEEEEEEEEE
         if (childPid == 0) {
+          Signal(SIGTSTP, SIG_DFL);
+          Signal(SIGINT, SIG_DFL);
           // setting up pipes for child
           for (int termPipe = 0; termPipe < nbCmd - 1; termPipe++) {
             if (termPipe == i) {
@@ -198,30 +219,49 @@ int main() {
 
           execvp(cmd[0], eArgs.we_wordv);
           // error in case execvp failed
-          unix_error("dvfefa");
+          fprintf(stderr, "%s", cmd[0]);
+          unix_error("");
 
           // END CHILDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD
         } else {
           if (i == 0) {
-            int newjobnb = emptyJobNb();
+            childPgid = childPid;
+            newjobnb = emptyJobNb();
             if (newjobnb < 0) {
-              Kill(childPid, SIGINT);
               fprintf(stderr, "No empty job slot\n");
+              Kill(childPid, SIGKILL);
               break;
             }
             if (backgroundProcess) {
-              if (changJobsState(newjobnb, childPgid, *l, BACKGROUND) < 0) {
-                Kill(childPid, SIGINT);
+              // printf("adding child %d to job %d state BACKGROUND\n",
+              // childPgid,
+              //        newjobnb);
+              if (changeJobsAll(newjobnb, childPgid, commandLine, BACKGROUND) <
+                  0) {
+                Kill(childPid, SIGKILL);
                 break;
               }
+              printf("Job [%d] %d     BACKGROUND     %s\n", newjobnb + 1,
+                     childPgid, commandLine);
 
-            } else if (changJobsState(newjobnb, childPgid, *l, FOREGROUND) <
-                       0) {
-              Kill(childPid, SIGINT);
-              break;
+            } else {
+              // printf("adding child %d to job %d state FOREGROUND\n",
+              // childPgid,
+              //        newjobnb);
+              if (changeJobsAll(newjobnb, childPgid, commandLine, FOREGROUND) <
+                  0) {
+                Kill(childPid, SIGKILL);
+                break;
+              }
             }
           }
-
+          if (setpgid(childPid, childPgid) < 0) {
+            fprintf(stderr, "failed to set child %d to pgid %d\n", childPid,
+                    childPgid);
+            Kill(childPid, SIGKILL);
+            break;
+          }
+          newProcess(childPid, newjobnb, PRUNNING);
           childPid = -1;
         }
       }
@@ -235,13 +275,36 @@ int main() {
       close(pipes[i][0]);
     }
 
-    if (!backgroundProcess) {
+    if (!backgroundProcess && childPgid > 0) {
+      if (tcsetpgrp(0, childPgid) < 0) {
+        fprintf(stderr, "Error setting up tcsetpgrp (shell)\n");
+        Kill(childPgid, SIGKILL);
+      }
+      // ignoring SIGTTOU
+      Signal(SIGTTOU, SIG_IGN);
       pid_t pidWait;
-      while ((pidWait = waitpid(-1, NULL, 0)) > 0) {
+      int status;
+      while ((pidWait = waitpid(-childPgid, &status, WUNTRACED)) > 0) {
+        if (WIFSTOPPED(status)) {
+          // printf("children group stopped via signal");
+          changeProccessState(pidWait, PSTOPPED);
+          break;
+        } else {
+          changeProccessState(pidWait, PDONE);
+        }
+      }
+      if (updateJobsList() < 0) {
+        exit(1);
       }
       if (pidWait < 0 && errno != ECHILD) {
         unix_error("waitpid error");
       }
+      if (tcsetpgrp(0, getpgid(0)) < 0) {
+        fprintf(stderr, "Error recovering tcsetpgrp (shell)\n");
+        Kill(childPgid, SIGKILL);
+        exit(1);
+      }
+      Signal(SIGTTOU, SIG_DFL);
     }
 
     if (dup2(stdoutCpy, 1) < 0) {

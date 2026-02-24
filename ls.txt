@@ -1,0 +1,8 @@
+.rw-r--r--  53k microwism 12 Feb 14:22 csapp.o
+.rwx------    0 microwism 17 Feb 09:47 ls.txt
+.rwxr-xr-x  484 microwism 11 Feb 12:04 Makefile
+.rw-r--r--  13k microwism 12 Feb 14:22 readcmd.o
+.rwx------ 5.1k microwism 11 Feb 12:04 sdriver.pl
+.rwxr-xr-x  74k microwism 17 Feb 09:45 shell
+drwxr-xr-x    - microwism 13 Feb 18:59 src
+drwxr-xr-x    - microwism 11 Feb 12:04 tests
