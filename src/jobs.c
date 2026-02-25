@@ -1,6 +1,7 @@
 #include "jobs.h"
 
 extern jobsTab Jobs;
+extern unsigned char isInteractive;
 
 int emptyJobNb() {
   for (int i = 0; i < MAXJOBS; i++) {
@@ -317,9 +318,10 @@ int Foreground(char **args) {
   }
   changeJobsState(jobNb, FOREGROUND);
 
-  if (tcsetpgrp(0, pgid) < 0) {
-    fprintf(stderr, "Error setting up tcsetpgrp (shell)\n");
-    Kill(-pgid, SIGKILL);
+  if (isInteractive && tcsetpgrp(0, pgid) < 0) {
+    fprintf(stderr,
+            "Error setting up tcsetpgrp (shell), killing child processes\n");
+    kill(-pgid, SIGKILL);
   }
   // ignoring SIGTTOU
   Signal(SIGTTOU, SIG_IGN);
@@ -338,9 +340,9 @@ int Foreground(char **args) {
   if (pidWait < 0 && errno != ECHILD) {
     unix_error("waitpid error");
   }
-  if (tcsetpgrp(0, getpgid(0)) < 0) {
+  if (isInteractive && tcsetpgrp(0, getpgid(0)) < 0) {
     fprintf(stderr, "Error recovering tcsetpgrp (shell)\n");
-    Kill(-pgid, SIGKILL);
+    kill(-pgid, SIGKILL);
     exit(1);
   }
   Signal(SIGTTOU, SIG_DFL);
@@ -440,7 +442,10 @@ int Terminate(char **args) {
     }
   }
 
-  Kill(-pgid, SIGKILL);
+  if (kill(-pgid, SIGKILL) < 0) {
+    perror("kill error");
+    return -1;
+  }
   return 0;
 }
 int Stop(char **args) {
@@ -477,6 +482,9 @@ int Stop(char **args) {
     }
   }
 
-  Kill(-pgid, SIGSTOP);
+  if (kill(-pgid, SIGKILL) < 0) {
+    perror("kill error");
+    return -1;
+  }
   return 0;
 }

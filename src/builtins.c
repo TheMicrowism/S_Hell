@@ -4,6 +4,7 @@
 extern char pwd[];
 extern char cwd[];
 extern builtinTab Builtins;
+extern jobsTab Jobs;
 
 int Echo(char **args) {
   for (int arg = 0; arg < MAXARGS; arg++) {
@@ -17,6 +18,15 @@ int Echo(char **args) {
 }
 
 int Quit(char **args) {
+  for (int i = 0; i < MAXJOBS; i++) {
+    if (Jobs.stateTab[i] != EMPTY) {
+      printf("Job [%d] %s is running, terminating...\n", i + 1,
+             Jobs.commandTab[i]);
+      fflush(stdout);
+      Kill(-Jobs.pgidTab[i], SIGKILL);
+    }
+  }
+
   exit(0);
   unix_error("error quitting");
 }

@@ -2,11 +2,13 @@
 #include "csapp.h"
 #include "jobs.h"
 #include "readcmd.h"
+#include <unistd.h>
 #include <wordexp.h>
 
 char cwd[BUFSIZ] = "\0";
 char pwd[BUFSIZ] = "\0";
 jobsTab Jobs = {.fgNb = -1};
+unsigned char isInteractive;
 
 builtinTab Builtins = {9,
                        {{Echo, "echo"},
@@ -80,6 +82,18 @@ int main()
   Signal(SIGINT, messageHandler);
   Signal(SIGTSTP, messageHandler);
 
+  if (!(isInteractive = isatty(0)))
+  {
+    printf("\n%s NON-INTERACTIVE MODE \e[0m\n", KBLU);
+    fflush(stdout);
+  };
+
+  if (!(isInteractive = isatty(0)))
+  {
+    printf("\n%s NON-INTERACTIVE MODE \e[0m\n", KBLU);
+    fflush(stdout);
+  };
+
   for (int i = 0; i < MAXJOBS; i++)
   {
     Jobs.stateTab[i] = EMPTY;
@@ -114,7 +128,12 @@ int main()
     {
       unix_error("Error fetching cwd");
     }
-    printf("%s%s>\e[0m ", KBLU, cwd);
+
+    if (isInteractive)
+    {
+      printf("%s%s>\e[0m ", KBLU, cwd);
+      fflush(stdout);
+    }
 
     l = readcmd(commandLine);
 
@@ -122,6 +141,7 @@ int main()
     if (!l)
     {
       printf("exit\n");
+      Quit(NULL);
       exit(0);
     }
 
@@ -200,7 +220,21 @@ int main()
         unix_error("Fix your pipe man");
       };
     }
-    // spawning children
+
+    // blocking SIGCHILD to avoid race condition in job creating process
+
+    sigset_t newSet, oldSet;
+    if (sigemptyset(&newSet) < 0 && sigaddset(&newSet, SIGCHLD))
+    {
+      unix_error(
+          "Error in creating child processes, failed to set up SIGCHLD mask");
+    }
+
+    if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0)
+    {
+      unix_error("Error in creating child processes, failed to proc mask");
+    }
+
     for (i = 0; i < nbCmd; i++)
     {
       wordexp_t eArgs;
@@ -277,7 +311,7 @@ int main()
             newjobnb = emptyJobNb();
             if (newjobnb < 0)
             {
-              fprintf(stderr, "No empty job slot\n");
+              fprintf(stderr, "No empty job slot, killing spawned children\n");
               Kill(childPid, SIGKILL);
               break;
             }
@@ -322,6 +356,11 @@ int main()
 
       wordfree(&eArgs);
     }
+    // restoring mask
+    if (sigprocmask(SIG_SETMASK, &oldSet, NULL) < 0)
+    {
+      unix_error("Error restoring mask for after spawning child processes");
+    }
 
     // father doing his plumbing
     for (i = 0; i < nbCmd - 1; i++)
@@ -332,13 +371,11 @@ int main()
 
     if (!backgroundProcess && childPgid > 0)
     {
-      if (isatty(0))
+      if (isInteractive && tcsetpgrp(0, childPgid) < 0)
       {
-        if (tcsetpgrp(0, childPgid) < 0)
-        {
-          fprintf(stderr, "Error setting up tcsetpgrp (shell)\n");
-          Kill(childPgid, SIGKILL);
-        }
+        fprintf(stderr,
+                "Error setting up tcsetpgrp (shell), killing processes\n");
+        kill(childPgid, SIGKILL);
       }
       // ignoring SIGTTOU
       Signal(SIGTTOU, SIG_IGN);
@@ -365,14 +402,11 @@ int main()
       {
         unix_error("waitpid error");
       }
-      if (isatty(0))
+      if (isInteractive && tcsetpgrp(0, getpgid(0)) < 0)
       {
-        if (tcsetpgrp(0, getpgid(0)) < 0)
-        {
-          fprintf(stderr, "Error recovering tcsetpgrp (shell)\n");
-          Kill(childPgid, SIGKILL);
-          exit(1);
-        }
+        fprintf(stderr, "Error recovering tcsetpgrp (shell)\n");
+        kill(childPgid, SIGKILL);
+        exit(1);
       }
       Signal(SIGTTOU, SIG_DFL);
     }
