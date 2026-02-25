@@ -2,11 +2,13 @@
 #include "csapp.h"
 #include "jobs.h"
 #include "readcmd.h"
+#include <unistd.h>
 #include <wordexp.h>
 
 char cwd[BUFSIZ] = "\0";
 char pwd[BUFSIZ] = "\0";
 jobsTab Jobs = {.fgNb = -1};
+unsigned char isInteractive;
 
 builtinTab Builtins = {9,
                        {{Echo, "echo"},
@@ -47,7 +49,7 @@ void handlerSIGCHLD(int sig) {
   if (update < 0) {
     exit(1);
   }
-  if (Jobs.fgNb < 0 && update > 0) {
+  if (Jobs.fgNb < 0 && update > 0 && isInteractive) {
 
     printf("\n%s%s>\e[0m ", KBLU, cwd);
     fflush(stdout);
@@ -68,6 +70,11 @@ int main() {
   Signal(SIGCHLD, handlerSIGCHLD);
   Signal(SIGINT, messageHandler);
   Signal(SIGTSTP, messageHandler);
+
+  if (!(isInteractive = isatty(0))) {
+    printf("\n%s NON-INTERACTIVE MODE \e[0m\n", KBLU);
+    fflush(stdout);
+  };
 
   for (int i = 0; i < MAXJOBS; i++) {
     Jobs.stateTab[i] = EMPTY;
@@ -98,13 +105,18 @@ int main() {
     if (getcwd(cwd, BUFSIZ) == NULL) {
       unix_error("Error fetching cwd");
     }
-    printf("%s%s>\e[0m ", KBLU, cwd);
+
+    if (isInteractive) {
+      printf("%s%s>\e[0m ", KBLU, cwd);
+      fflush(stdout);
+    }
 
     l = readcmd(commandLine);
 
     /* If input stream closed, normal termination */
     if (!l) {
       printf("exit\n");
+      Quit(NULL);
       exit(0);
     }
 
@@ -121,19 +133,6 @@ int main() {
       continue;
     }
     backgroundProcess = l->isBackground;
-    // parsing for &
-    //    for (i = 0; l->seq[nbCmd - 1][i] != 0; i++) {
-    //      if (strcmp(l->seq[nbCmd - 1][i], "&") == 0) {
-    //        if (l->seq[nbCmd - 1][i + 1] == 0) {
-    //          backgroundProcess = 1;
-    //          // printf("backgroundProcess\n");
-    //          l->seq[nbCmd - 1][i] = NULL;
-    //        } else {
-    //          fprintf(stderr, "syntax error: & is not placed at the end, "
-    //                          "executing process in the foreground \n");
-    //        }
-    //      }
-    //    }
     if (nbCmd > MAXCHILD) {
       fprintf(stderr, "can only run at max %d commands per job\n", MAXCHILD);
       continue;
@@ -169,7 +168,19 @@ int main() {
         unix_error("Fix your pipe man");
       };
     }
-    // spawning children
+
+    // blocking SIGCHILD to avoid race condition in job creating process
+
+    sigset_t newSet, oldSet;
+    if (sigemptyset(&newSet) < 0 && sigaddset(&newSet, SIGCHLD)) {
+      unix_error(
+          "Error in creating child processes, failed to set up SIGCHLD mask");
+    }
+
+    if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0) {
+      unix_error("Error in creating child processes, failed to proc mask");
+    }
+
     for (i = 0; i < nbCmd; i++) {
       wordexp_t eArgs;
       char **cmd = l->seq[i];
@@ -228,7 +239,7 @@ int main() {
             childPgid = childPid;
             newjobnb = emptyJobNb();
             if (newjobnb < 0) {
-              fprintf(stderr, "No empty job slot\n");
+              fprintf(stderr, "No empty job slot, killing spawned children\n");
               Kill(childPid, SIGKILL);
               break;
             }
@@ -268,6 +279,10 @@ int main() {
 
       wordfree(&eArgs);
     }
+    // restoring mask
+    if (sigprocmask(SIG_SETMASK, &oldSet, NULL) < 0) {
+      unix_error("Error restoring mask for after spawning child processes");
+    }
 
     // father doing his plumbing
     for (i = 0; i < nbCmd - 1; i++) {
@@ -276,9 +291,10 @@ int main() {
     }
 
     if (!backgroundProcess && childPgid > 0) {
-      if (tcsetpgrp(0, childPgid) < 0) {
-        fprintf(stderr, "Error setting up tcsetpgrp (shell)\n");
-        Kill(childPgid, SIGKILL);
+      if (isInteractive && tcsetpgrp(0, childPgid) < 0) {
+        fprintf(stderr,
+                "Error setting up tcsetpgrp (shell), killing processes\n");
+        kill(childPgid, SIGKILL);
       }
       // ignoring SIGTTOU
       Signal(SIGTTOU, SIG_IGN);
@@ -299,9 +315,9 @@ int main() {
       if (pidWait < 0 && errno != ECHILD) {
         unix_error("waitpid error");
       }
-      if (tcsetpgrp(0, getpgid(0)) < 0) {
+      if (isInteractive && tcsetpgrp(0, getpgid(0)) < 0) {
         fprintf(stderr, "Error recovering tcsetpgrp (shell)\n");
-        Kill(childPgid, SIGKILL);
+        kill(childPgid, SIGKILL);
         exit(1);
       }
       Signal(SIGTTOU, SIG_DFL);
