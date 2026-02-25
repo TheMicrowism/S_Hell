@@ -172,15 +172,16 @@ int main() {
     // blocking SIGCHILD to avoid race condition in job creating process
 
     sigset_t newSet, oldSet;
-    if (sigemptyset(&newSet) < 0 && sigaddset(&newSet, SIGCHLD)) {
+    if (sigemptyset(&newSet) < 0 || sigaddset(&newSet, SIGCHLD) < 0) {
       unix_error(
           "Error in creating child processes, failed to set up SIGCHLD mask");
     }
 
-    if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0) {
+    else if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0) {
       unix_error("Error in creating child processes, failed to proc mask");
     }
 
+    newjobnb = emptyJobNb();
     for (i = 0; i < nbCmd; i++) {
       wordexp_t eArgs;
       char **cmd = l->seq[i];
@@ -196,8 +197,11 @@ int main() {
       if (nbCmd <= 1) {
         exInFunction = executeBuiltins(eArgs.we_wordv);
       }
-
-      if (exInFunction != 0) {
+      if (newjobnb < 0) {
+        fprintf(stderr, "MAXJOBS of %d is reached, cannot execute %s \n",
+                MAXJOBS, commandLine);
+      }
+      if (exInFunction != 0 && newjobnb >= 0) {
         childPid = Fork();
         // CHILD HEREEEEEEEEEEEEEEEEEEEEEEEEEEE
         if (childPid == 0) {
@@ -237,12 +241,6 @@ int main() {
         } else {
           if (i == 0) {
             childPgid = childPid;
-            newjobnb = emptyJobNb();
-            if (newjobnb < 0) {
-              fprintf(stderr, "No empty job slot, killing spawned children\n");
-              Kill(childPid, SIGKILL);
-              break;
-            }
             if (backgroundProcess) {
               // printf("adding child %d to job %d state BACKGROUND\n",
               // childPgid,
@@ -282,6 +280,7 @@ int main() {
     // restoring mask
     if (sigprocmask(SIG_SETMASK, &oldSet, NULL) < 0) {
       unix_error("Error restoring mask for after spawning child processes");
+    } else {
     }
 
     // father doing his plumbing
@@ -291,7 +290,7 @@ int main() {
     }
 
     if (!backgroundProcess && childPgid > 0) {
-      if (isInteractive && tcsetpgrp(0, childPgid) < 0) {
+      if (isInteractive && !l->in && tcsetpgrp(0, childPgid) < 0) {
         fprintf(stderr,
                 "Error setting up tcsetpgrp (shell), killing processes\n");
         kill(childPgid, SIGKILL);
@@ -315,7 +314,7 @@ int main() {
       if (pidWait < 0 && errno != ECHILD) {
         unix_error("waitpid error");
       }
-      if (isInteractive && tcsetpgrp(0, getpgid(0)) < 0) {
+      if (isInteractive && !l->in && tcsetpgrp(0, getpgid(0)) < 0) {
         fprintf(stderr, "Error recovering tcsetpgrp (shell)\n");
         kill(childPgid, SIGKILL);
         exit(1);
