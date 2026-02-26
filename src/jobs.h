@@ -1,5 +1,21 @@
 #include "shell.h"
 
+enum processState { PEMPTY, PRUNNING, PSTOPPED, PDONE };
+typedef struct {
+  pid_t pid[MAXCHILD];
+  enum processState pidStateTab[MAXCHILD];
+} jobPidsTab;
+
+enum jobState { EMPTY, FOREGROUND, BACKGROUND, STOPPED };
+
+typedef struct {
+  int fgNb;
+  pid_t pgidTab[MAXJOBS];
+  enum jobState stateTab[MAXJOBS];
+  char commandTab[MAXJOBS][BUFSIZ];
+  jobPidsTab childrenPids[MAXJOBS];
+} jobsTab;
+
 extern jobsTab Jobs;
 
 // find an empty index in the global variable Jobs

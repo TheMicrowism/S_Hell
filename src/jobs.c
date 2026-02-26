@@ -1,4 +1,5 @@
 #include "jobs.h"
+#include <signal.h>
 
 extern jobsTab Jobs;
 extern unsigned char isInteractive;
@@ -86,8 +87,6 @@ int changeJobsAll(int jobNb, pid_t pgid, char *lineRead, enum jobState state) {
     return -1;
   }
 
-  // Use this line for debugging job state changes
-  // printf("Jobs: [%d] %d\n", jobNb + 1, state);
   if (jobChanged)
     return 0;
   else {
@@ -107,7 +106,6 @@ int changeJobsState(int jobNb, enum jobState state) {
     perror("Error blocking signals for changeJobsState");
     return -1;
   }
-  // code commences
   Jobs.stateTab[jobNb] = state;
   if (state == FOREGROUND)
     Jobs.fgNb = jobNb;
@@ -285,7 +283,6 @@ int Foreground(char **args) {
       fprintf(stderr, "Invalid job number\n");
       return -1;
     }
-    // printf("Detected argument %ld\n", val);
     if (Jobs.stateTab[val - 1] == EMPTY) {
       fprintf(stderr, "%%%ld: no such job\n", val);
       return -1;
@@ -297,7 +294,6 @@ int Foreground(char **args) {
       fprintf(stderr, "invalid pgid\n");
       return -1;
     }
-    //  printf("detected pgid %d\n", pgid);
     if ((jobNb = findJobNb(pgid)) < 0) {
       fprintf(stderr, "pgid %d not found\n", pgid);
       return -1;
@@ -310,7 +306,6 @@ int Foreground(char **args) {
   if (Jobs.stateTab[jobNb] != BACKGROUND) {
     while ((pidWait = waitpid(-pgid, &status, WCONTINUED)) > 0) {
       if (WIFCONTINUED(status)) {
-        // printf("children group stopped via signal");
         changeProccessState(pidWait, PRUNNING);
         break;
       }
@@ -327,7 +322,6 @@ int Foreground(char **args) {
   Signal(SIGTTOU, SIG_IGN);
   while ((pidWait = waitpid(-pgid, &status, WUNTRACED)) > 0) {
     if (WIFSTOPPED(status)) {
-      // printf("children group stopped via signal");
       changeProccessState(pidWait, PSTOPPED);
       break;
     } else {
@@ -364,7 +358,6 @@ int Background(char **args) {
       fprintf(stderr, "Invalid job number\n");
       return -1;
     }
-    //  printf("Detected argument %ld\n", val);
     if (Jobs.stateTab[val - 1] == EMPTY) {
       fprintf(stderr, "%%%ld: no such job\n", val);
       return -1;
@@ -376,7 +369,6 @@ int Background(char **args) {
       fprintf(stderr, "invalid pgid\n");
       return -1;
     }
-    //    printf("detected pgid %d\n", pgid);
     if ((jobNb = findJobNb(pgid)) < 0) {
       fprintf(stderr, "pgid %d not found\n", pgid);
       return -1;
@@ -389,7 +381,6 @@ int Background(char **args) {
   if (Jobs.stateTab[jobNb] != BACKGROUND) {
     while ((pidWait = waitpid(-pgid, &status, WCONTINUED)) > 0) {
       if (WIFCONTINUED(status)) {
-        // printf("children group stopped via signal");
         changeProccessState(pidWait, PRUNNING);
         break;
       }
@@ -423,7 +414,6 @@ int Terminate(char **args) {
       fprintf(stderr, "Invalid job number\n");
       return -1;
     }
-    //  printf("Detected argument %ld\n", val);
     if (Jobs.stateTab[val - 1] == EMPTY) {
       fprintf(stderr, "%%%ld: no such job\n", val);
       return -1;
@@ -435,7 +425,6 @@ int Terminate(char **args) {
       fprintf(stderr, "invalid pgid\n");
       return -1;
     }
-    //    printf("detected pgid %d\n", pgid);
     if ((jobNb = findJobNb(pgid)) < 0) {
       fprintf(stderr, "pgid %d not found\n", pgid);
       return -1;
@@ -463,7 +452,6 @@ int Stop(char **args) {
       fprintf(stderr, "Invalid job number\n");
       return -1;
     }
-    //  printf("Detected argument %ld\n", val);
     if (Jobs.stateTab[val - 1] == EMPTY) {
       fprintf(stderr, "%%%ld: no such job\n", val);
       return -1;
@@ -475,14 +463,13 @@ int Stop(char **args) {
       fprintf(stderr, "invalid pgid\n");
       return -1;
     }
-    //    printf("detected pgid %d\n", pgid);
     if ((jobNb = findJobNb(pgid)) < 0) {
       fprintf(stderr, "pgid %d not found\n", pgid);
       return -1;
     }
   }
 
-  if (kill(-pgid, SIGKILL) < 0) {
+  if (kill(-pgid, SIGSTOP) < 0) {
     perror("kill error");
     return -1;
   }

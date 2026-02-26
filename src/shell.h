@@ -5,7 +5,6 @@
  * Copyright (C) 2002, Simon Nieuviarts
  */
 
-#include "builtins.h"
 #include "csapp.h"
 #include "readcmd.h"
 #include "wordexp.h"
@@ -16,22 +15,6 @@
 #define MAXCHILD 10
 #define MAXARGS 100
 #define MAXJOBS 10
-
-enum processState { PEMPTY, PRUNNING, PSTOPPED, PDONE };
-typedef struct {
-  pid_t pid[MAXCHILD];
-  enum processState pidStateTab[MAXCHILD];
-} jobPidsTab;
-
-enum jobState { EMPTY, FOREGROUND, BACKGROUND, STOPPED };
-
-typedef struct {
-  int fgNb;
-  pid_t pgidTab[MAXJOBS];
-  enum jobState stateTab[MAXJOBS];
-  char commandTab[MAXJOBS][BUFSIZ];
-  jobPidsTab childrenPids[MAXJOBS];
-} jobsTab;
 
 #define KNRM "\x1B[0m"
 #define KRED "\x1B[31m"
