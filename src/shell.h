@@ -15,7 +15,6 @@
 
 #define MAXCHILD 10
 #define MAXARGS 100
-#define MAXPIPE 10
 #define MAXJOBS 10
 
 enum processState { PEMPTY, PRUNNING, PSTOPPED, PDONE };

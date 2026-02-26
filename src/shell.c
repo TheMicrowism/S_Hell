@@ -354,7 +354,8 @@ int main()
             Kill(childPid, SIGKILL);
             break;
           }
-          newProcess(childPid, newjobnb, PRUNNING);
+          if (newProcess(childPid, newjobnb, PRUNNING) < 0)
+            break;
           childPid = -1;
         }
       }
