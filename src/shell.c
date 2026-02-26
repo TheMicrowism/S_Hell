@@ -185,13 +185,16 @@ int main() {
     for (i = 0; i < nbCmd; i++) {
       wordexp_t eArgs;
       char **cmd = l->seq[i];
+      unsigned char successWordexp = 1;
       for (j = 0; cmd[j] != 0; j++) {
         if (wordexp(cmd[j], &eArgs, j == 0 ? 0 : WRDE_APPEND) != 0) {
-          fprintf(stderr, "fatal: error expanding arguments, segfault "
-                          "imminent, quitting\n");
-          Quit(NULL);
+          successWordexp = 0;
+          fprintf(stderr, "wordexp error\n");
+          break;
         }
       }
+      if (!successWordexp)
+        break;
 
       // if no pipe needed then we can execute builtins
       int exInFunction = 1;
@@ -240,12 +243,6 @@ int main() {
         } else {
           if (i == 0) {
             childPgid = childPid;
-            newjobnb = emptyJobNb();
-            if (newjobnb < 0) {
-              fprintf(stderr, "No empty job slot, killing spawned children\n");
-              Kill(childPid, SIGKILL);
-              break;
-            }
             if (backgroundProcess) {
               if (changeJobsAll(newjobnb, childPgid, commandLine, BACKGROUND) <
                   0) {

@@ -300,7 +300,10 @@ int Foreground(char **args) {
     }
   }
 
-  Kill(-pgid, SIGCONT);
+  if (kill(-pgid, SIGCONT) < 0) {
+    fprintf(stderr, "kill error (Foreground)\n");
+    return -1;
+  };
   pid_t pidWait;
   int status;
   if (Jobs.stateTab[jobNb] != BACKGROUND) {
@@ -375,7 +378,10 @@ int Background(char **args) {
     }
   }
 
-  Kill(-pgid, SIGCONT);
+  if (kill(-pgid, SIGCONT) < 0) {
+    fprintf(stderr, "kill error (Background)\n");
+    return -1;
+  }
   pid_t pidWait;
   int status;
   if (Jobs.stateTab[jobNb] != BACKGROUND) {
