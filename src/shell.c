@@ -224,17 +224,18 @@ int main()
     // blocking SIGCHILD to avoid race condition in job creating process
 
     sigset_t newSet, oldSet;
-    if (sigemptyset(&newSet) < 0 && sigaddset(&newSet, SIGCHLD))
+    if (sigemptyset(&newSet) < 0 || sigaddset(&newSet, SIGCHLD) < 0)
     {
       unix_error(
           "Error in creating child processes, failed to set up SIGCHLD mask");
     }
 
-    if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0)
+    else if (sigprocmask(SIG_BLOCK, &newSet, &oldSet) < 0)
     {
       unix_error("Error in creating child processes, failed to proc mask");
     }
 
+    newjobnb = emptyJobNb();
     for (i = 0; i < nbCmd; i++)
     {
       wordexp_t eArgs;
@@ -254,8 +255,12 @@ int main()
       {
         exInFunction = executeBuiltins(eArgs.we_wordv);
       }
-
-      if (exInFunction != 0)
+      if (newjobnb < 0)
+      {
+        fprintf(stderr, "MAXJOBS of %d is reached, cannot execute %s \n",
+                MAXJOBS, commandLine);
+      }
+      if (exInFunction != 0 && newjobnb >= 0)
       {
         childPid = Fork();
         // CHILD HEREEEEEEEEEEEEEEEEEEEEEEEEEEE
@@ -361,6 +366,9 @@ int main()
     {
       unix_error("Error restoring mask for after spawning child processes");
     }
+    else
+    {
+    }
 
     // father doing his plumbing
     for (i = 0; i < nbCmd - 1; i++)
@@ -371,7 +379,7 @@ int main()
 
     if (!backgroundProcess && childPgid > 0)
     {
-      if (isInteractive && tcsetpgrp(0, childPgid) < 0)
+      if (isInteractive && !l->in && tcsetpgrp(0, childPgid) < 0)
       {
         fprintf(stderr,
                 "Error setting up tcsetpgrp (shell), killing processes\n");
@@ -402,7 +410,7 @@ int main()
       {
         unix_error("waitpid error");
       }
-      if (isInteractive && tcsetpgrp(0, getpgid(0)) < 0)
+      if (isInteractive && !l->in && tcsetpgrp(0, getpgid(0)) < 0)
       {
         fprintf(stderr, "Error recovering tcsetpgrp (shell)\n");
         kill(childPgid, SIGKILL);
