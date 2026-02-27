@@ -6,12 +6,6 @@
 
 *While it might sound a bit artificial, this README is indeed written by a human being*
 
-Compile with 
-
-``` 
-make
-```
-
 ## Core program structure
 
 The block of pseudo code below describes the functionality of the shell 
@@ -22,9 +16,8 @@ while True:
 	printcwd()   					//print the current working directory (nice)
 	l = readcmd()					//parsing input
 	redirect(l)						//redirection of input, output
-	if (!ExecuteBuiltin(l)){		//execute builtins
+	if (!ExecuteBuiltin(l)) then	//execute builtins
 		ExecuteExternals(l)			//execute eternal commands
-	}
 	recover_stdinout()				
 ```
 
@@ -34,24 +27,16 @@ The parsing of commands are done by `readcmd.c` via `readcmd`
 
 ### Shell builtins execution
 
-Shell builtins are essentially functions triggered by certain commands. We define structures:
+Shell builtins are essentially functions triggered by certain commands. We define:
 
 ```
 typedef struct {
   int (*BuiltinFunc)(char **args);
   char *BuiltinName;
 } builtin;
-
-typedef struct {
-  int size;
-  builtin tab[];
-} builtinTab;
-
-builtinTab Builtins {}		//defini dans shell.c
 ```
-La global variable `Builtins` is of type `builtinTab` associates function with strings. If the number of pipe is 0, the parsed command is passed to a function to look for a corresponding builtin function, if matched, said builtin is executed via a simple function call.
+The global variable `Builtins` is contains an array of `builtin` that associate function with strings. If the number of pipe is 0, the parsed command is passed to a function to look for a corresponding builtin function, if matched, said builtin is executed via a simple function call. The following are implemented builtins: 
 
-List of builtin functions and their command:  
 - `Quit` mapped to "q" and "quit". *This will terminate (via `SIGKILL`) any running child processes and exit the shell.*
 - `Echo` mapped to "echo". 
 - `ChangeDir` mapped to "cd". 
@@ -88,17 +73,13 @@ The function `readcmd()` gives us a struct that contains parsed file names for I
 
 #### Pipes
 
-We count the number of command parsed with `nbCmd` ,then we create an array `int pipes[nbCmd -1][2]` to serve as a pipe array.
-
-For each child process of index `i` :
+We count the number of command parsed with `nbCmd` ,then we create an array `int pipes[nbCmd -1][2]` to serve as a pipe array. For each child process of index `i` :
 
 - If `i > 0` ,  its input file descriptor is replaced with the read end of the `i-1`th pipe.
 
 - If `i < nbCmd -1`, its output file descriptor is replaced with the read end of the `i`th pipe.   
 
-This is completed using `dup2()`.
-
-The shell then closes every end of every pipe in the array, and we close every unused end of every pipe in every child processes.
+This is completed using `dup2()`. The shell then closes every end of every pipe in the array, and we close every unused end of every pipe in every child processes.
 
 #### Background job execution 
 
@@ -109,7 +90,6 @@ The shell announces the job number,  `pgid` and the job's commands when a job is
 ```
 /home/microwism/Apps/S_Hell> sleep 2 &
 Job [1] 7534     BACKGROUND     sleep 2 &
-/home/microwism/Apps/S_Hell>
 ```
 
 **The parser is not modified to recognize a chain of multiple jobs**. The following input is **NOT **excepted and will return a misplaced & error.
@@ -164,17 +144,11 @@ We constructed a variety of functions that serves as an interface with the globa
 enum jobState { EMPTY, FOREGROUND, BACKGROUND, STOPPED };
 ```
 
-`EMPTY` signifies this job index is unoccupied. `FOREGROUND`, `BACKGROUND`, `STOPPED` are explicit. 
-
-A job that has done its execution in the background will be announced as `DONE` whenever the shell detects all of its processes are done. See example :
+`EMPTY` signifies this job index is unoccupied. `FOREGROUND`, `BACKGROUND`, `STOPPED` are explicit.  A job that has done its execution in the background will be announced as `DONE` whenever the shell detects all of its processes are done. In the example, `sleep 1 &` was executed 1 second prior:
 
 ```
-/home/microwism/Apps/S_Hell> sleep 1 &
-Job [1] 10543     BACKGROUND     sleep 1 &
 /home/microwism/Apps/S_Hell>
 Job [1] DONE         sleep 1 &
-
-/home/microwism/Apps/S_Hell>
 ```
 
 Similarly, the shell will announce the stopping of a job when it detects all of its processes has been stopped. 
@@ -189,11 +163,7 @@ Processes state are keep to date mainly using the `SIGCHLD` handler. A process o
 
 ## Shell-like expansion
 
-We use `wordexp()` to expand every word parsed with a shell-like behavior. We create `wordexp_t eArgs` and then iterate through commands, append the new expanded words to `eArgs` and simply pass it to any builtin function or `execvp` as the argument vector. 
-
-*Any error caught set `successWordexp` to 0, and we halt the execution of commands* 
-
-Example of shell-like expansion:
+We use `wordexp()` to expand every word parsed with a shell-like behavior. We create `wordexp_t eArgs` and then iterate through commands, append the new expanded words to `eArgs` and simply pass it to any builtin function or `execvp` as the argument vector. *Any error caught set `successWordexp` to 0, and we halt the execution of commands* . Below is an example of shell-like expansion:
 
 ```
 /home/microwism/Apps/S_Hell> echo src/*
