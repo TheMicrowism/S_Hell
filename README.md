@@ -14,7 +14,7 @@ make
 
 ## Core program structure
 
-The block of pseudo code below describes the functionality of the shell
+The block of pseudo code below describes the functionality of the shell 
 
 ```
 while True:
@@ -27,8 +27,6 @@ while True:
 	}
 	recover_stdinout()				
 ```
-
-
 
 ## General command execution
 
@@ -68,12 +66,21 @@ List of builtin functions and their command:
 The variable `exInFunction` represented the execution of a shell builtins. If none were executed, **and the number of running jobs has not yet reached MAXJOBS (`shell.h`)** we execute the parsed commands as external commands.
 
 - For each command, we `Fork()` (via `csapp.c`) a child process, the child execute the command via `execvp()` .  
-
 - We take the `pid` of the first child and all children of job to that `pid` as `pgid`.  
-
 - After all child processes have been created and **the launched job is a foreground one**, we pass the terminal to the group using `tcsetpgrp()` the shell waits (`waitpid()`) for all children of the active foreground job to terminate/change state.
-
 - A new job is created in the job table accordingly.
+
+#### Child processes signal handling
+
+The shell, before the main `while` loop, changes its `SIGINT` and `SIGTSTP` handlers to simply displaying a message:
+
+```
+/home/microwism/Apps/S_Hell> ^Ccall quit or q to exit shell
+```
+
+`tcsetpgrp()` is necessary because the children are put into another group other than that of the shell, so any signal the shell receives will not be forwarded to its children. 
+
+At the beginning of each child, we switched back the handlers to their default ones. As an extra precaution, any error handling from the shell invokes `SIGKILL` to the children instead of `SIGINT`. 
 
  #### Input/Output redirection
 
@@ -96,6 +103,14 @@ The shell then closes every end of every pipe in the array, and we close every u
 #### Background job execution 
 
 The struct given by `readcmd()` now has `unsigned char isBackground` that indicates if the commands parsed should be executed in the background. As described before, when a background job is launched the shell does not wait for its termination and all is handled by a `SIGCHLD` handler.
+
+The shell announces the job number,  `pgid` and the job's commands when a job is launched in the background.
+
+```
+/home/microwism/Apps/S_Hell> sleep 2 &
+Job [1] 7534     BACKGROUND     sleep 2 &
+/home/microwism/Apps/S_Hell>
+```
 
 **The parser is not modified to recognize a chain of multiple jobs**. The following input is **NOT **excepted and will return a misplaced & error.
 
@@ -149,6 +164,8 @@ We constructed a variety of functions that serves as an interface with the globa
 enum jobState { EMPTY, FOREGROUND, BACKGROUND, STOPPED };
 ```
 
+`EMPTY` signifies this job index is unoccupied. `FOREGROUND`, `BACKGROUND`, `STOPPED` are explicit. 
+
 A job that has done its execution in the background will be announced as `DONE` whenever the shell detects all of its processes are done. See example :
 
 ```
@@ -168,7 +185,7 @@ Similarly, the shell will announce the stopping of a job when it detects all of 
 enum processState { PEMPTY, PRUNNING, PSTOPPED, PDONE };
 ```
 
-Processes state are keep to date mainly using the `SIGCHLD` handler.
+Processes state are keep to date mainly using the `SIGCHLD` handler. A process of state `PRUNNING` prevents its job from turning `STOPPED` or being announced as `DONE` .
 
 ## Shell-like expansion
 
@@ -176,7 +193,15 @@ We use `wordexp()` to expand every word parsed with a shell-like behavior. We cr
 
 *Any error caught set `successWordexp` to 0, and we halt the execution of commands* 
 
+Example of shell-like expansion:
+
+```
+/home/microwism/Apps/S_Hell> echo src/*
+src/builtins.c src/builtins.h src/csapp.c src/csapp.h src/jobs.c src/jobs.h src/readcmd.c src/readcmd.h src/shell.c src/shell.h
+```
+
 ## Non - interactive mode
 
-This shell is fitted with a non-interactive mode that can be triggered by any instructions injecting driver. The shell detects if it is connected to a terminal, if not, it does not call `tcsetpgrp()` to prevent error. 
+This shell is fitted with a non-interactive mode that can be triggered by any instructions injecting driver. The shell detects if it is connected to a terminal, if not, it does not call `tcsetpgrp()` to prevent error.  
 
+When using the `perl` shell driver, inputting `cat` will simply close the "stdin" right after the `cat` is launched.
