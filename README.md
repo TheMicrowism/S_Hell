@@ -17,7 +17,7 @@ while True:
 	l = readcmd()					//parsing input
 	redirect(l)						//redirection of input, output
 	if (!ExecuteBuiltin(l)) then	//execute builtins
-		ExecuteExternals(l)			//execute eternal commands
+		ExecuteExternals(l)			//execute external commands
 	recover_stdinout()				
 ```
 
@@ -69,7 +69,7 @@ At the beginning of each child, we switched back the handlers to their default o
 
  #### Input/Output redirection
 
-The function `readcmd()` gives us a struct that contains parsed file names for In/Output redirection. We simply open the files using `open()` then using the new file descriptors return to override`stdin` and `stdout` using `dup2()`. We keep a backup of `stdin` and `stdout` to recover them after all foreground executions is done.
+The function `readcmd()` gives us a struct that contains parsed file names for In/Output redirection. We simply open the files using `open()` then using the new file descriptors returned to override`stdin` and `stdout` using `dup2()`. We keep a backup of `stdin` and `stdout` to recover them after all foreground executions are done.
 
 #### Pipes
 
@@ -92,7 +92,7 @@ The shell announces the job number,  `pgid` and the job's commands when a job is
 Job [1] 7534     BACKGROUND     sleep 2 &
 ```
 
-**The parser is not modified to recognize a chain of multiple jobs**. The following input is **NOT **excepted and will return a misplaced & error.
+**The parser is not modified to recognize a chain of multiple jobs**. The following input is **NOT** accepted and will return a misplaced & error.
 
 ```
 sleep 100 & sleep 100 & 
